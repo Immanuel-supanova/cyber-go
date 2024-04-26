@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -108,4 +109,45 @@ func LoadPrivateKey(filepath string) (*rsa.PrivateKey, error) {
 	}
 
 	return privKey, nil
+}
+
+func LoadPublicKey(pemString string) (*rsa.PublicKey, error) {
+	// Decode the PEM block
+	block, _ := pem.Decode([]byte(pemString))
+	if block == nil {
+		return nil, errors.New("failed to decode PEM block")
+	}
+
+	// Parse the public key
+	publicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	// Type assert to *rsa.PublicKey
+	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, err
+	}
+
+	return rsaPublicKey, nil
+}
+
+func PublicKeyPem(pubkey any) (string, error) {
+	// Convert the public key to DER format
+	derBytes, err := x509.MarshalPKIXPublicKey(pubkey)
+	if err != nil {
+		return "", err
+	}
+
+	// Create a PEM block for the public key
+	pemBlock := &pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: derBytes,
+	}
+
+	// Encode the PEM block to a string
+	pemString := string(pem.EncodeToMemory(pemBlock))
+
+	return pemString, nil
 }

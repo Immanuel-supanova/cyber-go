@@ -68,7 +68,7 @@ func RemovePKCS7Padding(data []byte) ([]byte, error) {
 	return data[:length-padding], nil
 }
 
-func HybridEncrypt(data string) (string, string, error) {
+func HybridEncrypt(data, pubKey string) (string, string, error) {
 	key := GenerateAESKey()
 	encdata, err := EncryptAES(key, data)
 
@@ -76,7 +76,7 @@ func HybridEncrypt(data string) (string, string, error) {
 		return "", "", err
 	}
 
-	privkey, err := LoadPrivateKey("private_key.pem")
+	pubkey, err := LoadPublicKey(pubKey)
 	if err != nil {
 		return "", "", err
 	}
@@ -85,9 +85,9 @@ func HybridEncrypt(data string) (string, string, error) {
 	enckey, err := rsa.EncryptOAEP(
 		sha256.New(), // Random source
 		rand.Reader,
-		&privkey.PublicKey, // Public key
-		key,                // Message to encrypt
-		nil,                // Label (use nil for no label)
+		pubkey, // Public key
+		key,    // Message to encrypt
+		nil,    // Label (use nil for no label)
 	)
 
 	if err != nil {
