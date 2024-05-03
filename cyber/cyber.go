@@ -1,37 +1,48 @@
 package cyber
 
 import (
-	"bytes"
 	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
+	"io"
 )
 
-func EncryptAES(key []byte, plaintext string) ([]byte, error) {
+func EncryptGCMAES(key []byte, plaintext string) ([]byte, []byte, error) {
 	c, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	blockSize := c.BlockSize()
-	paddedText, err := AddPKCS7Padding([]byte(plaintext), blockSize)
+	nonce := make([]byte, 12)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, nil, err
+	}
 
+	aesgcm, err := cipher.NewGCM(c)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	ciphertext := make([]byte, len(paddedText))
+	ciphertext := aesgcm.Seal(nil, nonce, []byte(plaintext), nil)
 
-	c.Encrypt(ciphertext, paddedText)
-
-	return ciphertext, nil
+	return ciphertext, nonce, nil
 }
 
-func DecryptAES(key []byte, ct []byte) ([]byte, error) {
+func DecryptGCMAES(key []byte, nonce []byte, ct []byte) ([]byte, error) {
 	c, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	aesgcm, err := cipher.NewGCM(c)
+	if err != nil {
+		return nil, err
+	}
+
+	plaintext, err := aesgcm.Open(nil, nonce, ct, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -39,46 +50,20 @@ func DecryptAES(key []byte, ct []byte) ([]byte, error) {
 	pt := make([]byte, len(ct))
 	c.Decrypt(pt, ct)
 
-	// No need to remove padding here, just return the plaintext
-	return pt, nil
+	return plaintext, nil
 }
 
-// AddPKCS7Padding adds PKCS#7 padding to the input data to make it a multiple of blockSize.
-func AddPKCS7Padding(data []byte, blockSize int) ([]byte, error) {
-	padding := blockSize - (len(data) % blockSize)
-	pad := bytes.Repeat([]byte{byte(padding)}, padding)
-	return append(data, pad...), nil
-}
-
-// RemovePKCS7Padding removes PKCS#7 padding from the input data.
-func RemovePKCS7Padding(data []byte) ([]byte, error) {
-	length := len(data)
-	if length == 0 {
-		return nil, errors.New("input data is empty")
-	}
-	padding := int(data[length-1])
-	if padding > length || padding == 0 {
-		return nil, errors.New("invalid padding")
-	}
-	for i := length - padding; i < length; i++ {
-		if data[i] != byte(padding) {
-			return nil, errors.New("invalid padding")
-		}
-	}
-	return data[:length-padding], nil
-}
-
-func HybridEncrypt(data, pubKey string) (string, string, error) {
+func HybridEncrypt(data, pubKey string) (string, string, string, error) {
 	key := GenerateAESKey()
-	encdata, err := EncryptAES(key, data)
+	encdata, nonce, err := EncryptGCMAES(key, data)
 
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	pubkey, err := LoadPublicKey(pubKey)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	// Encrypt the message using RSA-OAEP
@@ -91,14 +76,20 @@ func HybridEncrypt(data, pubKey string) (string, string, error) {
 	)
 
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
-	return hex.EncodeToString(encdata), hex.EncodeToString(enckey), nil
+	return hex.EncodeToString(encdata), hex.EncodeToString(enckey), hex.EncodeToString(nonce), nil
 }
 
-func HybridDecrypt(data, key string) (string, error) {
+func HybridDecrypt(data, nonce, key string) (string, error) {
 	encdata, err := hex.DecodeString(data)
+
+	if err != nil {
+		return "", err
+	}
+
+	encnonce, err := hex.DecodeString(nonce)
 
 	if err != nil {
 		return "", err
@@ -127,17 +118,44 @@ func HybridDecrypt(data, key string) (string, error) {
 		return "", err
 	}
 
-	decdata, err := DecryptAES(deckey, encdata)
+	decdata, err := DecryptGCMAES(deckey, encnonce, encdata)
 
 	if err != nil {
 		return "", err
 	}
 
-	unpaddedData, err := RemovePKCS7Padding([]byte(decdata))
+	return string(decdata), nil
+}
 
+func EncryptAESFromPEM(plaintext string) ([]byte, []byte, error) {
+	// Load AESKey
+	aesKey, err := LoadAESKey("aes_key.pem")
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 
-	return string(unpaddedData), nil
+	// Encrypt message
+	aesencData, nonce, err := EncryptGCMAES(aesKey, plaintext)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return aesencData, nonce, err
+
+}
+
+func DecryptAESFromPEM(ct, nonce []byte) ([]byte, error) {
+	// Load AESKey
+	aesKey, err := LoadAESKey("aes_key.pem")
+	if err != nil {
+		return nil, err
+	}
+
+	// Encrypt message
+	aesdecData, err := DecryptGCMAES(aesKey, nonce, ct)
+	if err != nil {
+		return nil, err
+	}
+
+	return aesdecData, err
 }

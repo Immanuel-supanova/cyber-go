@@ -89,6 +89,39 @@ func CreateRSAKeyFile() {
 	}
 }
 
+func CreateAESKeyFile() {
+	aesFilePath := "aes_key.pem"
+
+	_, err := os.Stat(aesFilePath)
+
+	if os.IsNotExist(err) {
+		aesKey := GenerateAESKey()
+
+		// Encode key to PEM format
+		block := &pem.Block{
+			Type:  "AES KEY",
+			Bytes: aesKey,
+		}
+
+		// Write PEM encoded key to a file
+		file, err := os.Create(aesFilePath)
+		if err != nil {
+			fmt.Println("Error generating AES key file:", err)
+			return
+		}
+		defer file.Close()
+
+		err = pem.Encode(file, block)
+		if err != nil {
+			fmt.Println("Error Writing AES key to file:", err)
+			return
+		}
+
+	} else {
+		return
+	}
+}
+
 func LoadPrivateKey(filepath string) (*rsa.PrivateKey, error) {
 	// Read the PEM file
 	pemData, err := os.ReadFile(filepath)
@@ -131,6 +164,30 @@ func LoadPublicKey(pemString string) (*rsa.PublicKey, error) {
 	}
 
 	return rsaPublicKey, nil
+}
+
+func LoadAESKey(filename string) ([]byte, error) {
+	// Read the PEM file
+	pemData, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decode the PEM block
+	block, _ := pem.Decode(pemData)
+	if block == nil {
+		return nil, errors.New("failed to decode PEM block")
+	}
+
+	// Check if the PEM block type is "AES KEY"
+	if block.Type != "AES KEY" {
+		return nil, errors.New("unexpected PEM block type")
+	}
+
+	// Extract the AES key
+	key := block.Bytes
+
+	return key, nil
 }
 
 func PublicKeyPem(pubkey any) (string, error) {
